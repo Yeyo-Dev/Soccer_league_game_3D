@@ -5,7 +5,7 @@ A browser-based 3D football game built with JavaScript and Three.js.
 Champions League: Dreams 3D is a personal game development project focused on creating an interactive football experience with 3D graphics, configurable teams, tactical formations, player attributes, and AI-controlled opponents.
 
 ## Preview
-![Gameplay Screenshot](./gameplay.jpg)
+![Gameplay Screenshot](./gameplay.jpeg)
 ![Gameplay](./gameplay1.jpeg)
 ![Gameplay](./gameplay2.jpeg)
 ## Features
