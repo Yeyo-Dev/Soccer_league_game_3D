@@ -2147,28 +2147,32 @@
 
                     // Evaluación determinista de necesidad de Sprint (Ataque y Defensa)
                     let shouldSprint = false;
-                    if (this.stamina > 20) {
+                    if (this.stamina > 12) {
                         if (ball.possessor === this) {
                             // En ataque con balón: sprintar si un rival lo persigue cerca o tiene espacio libre hacia el arco rival
                             let oppGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
                             let distToOppGoal = Math.abs(oppGoalX - this.x);
-                            let beingChased = distToClosestOpp < 130;
-                            let counterAttackSpace = distToOppGoal > 160 && distToClosestOpp > 85 && this.stats.vel >= 82;
+                            let beingChased = distToClosestOpp < 135;
+                            let counterAttackSpace = distToOppGoal > 140 && distToClosestOpp > 75 && this.stats.vel >= 78;
                             if (beingChased || counterAttackSpace) shouldSprint = true;
-                        } else if (!ball.possessor && this === closestTeammate && distToBall > 35) {
+                        } else if (!ball.possessor && this === closestTeammate && distToBall > 30) {
                             // Balón suelto en disputa: sprintar para ganarlo primero
                             shouldSprint = true;
                         } else if (oppHasInitiative) {
-                            // En defensa: sprintar si presiona al portador o corre a bloquear línea de tiro cerca del área propia
+                            // En defensa: sprintar activamente para alcanzar al portador, cerrar espacios o llegar a barrer
+                            let focusTarget = ball.possessor || ball;
+                            let distToCarrier = distance(this.x, this.y, focusTarget.x, focusTarget.y);
                             let ownGoalX = this.team === 'blue' ? 0 : FIELD_WIDTH;
-                            let ballNearOwnGoal = Math.abs(ball.x - ownGoalX) < 310;
-                            if (this === closestTeammate || (ballNearOwnGoal && distToBall < 240)) {
+                            let ballNearOwnGoal = Math.abs(ball.x - ownGoalX) < 340;
+                            let carrierBehindMe = (this.team === 'blue' && focusTarget.x < this.x + 25) || (this.team === 'red' && focusTarget.x > this.x - 25);
+
+                            if (this === closestTeammate || carrierBehindMe || (ballNearOwnGoal && distToCarrier < 280) || distToCarrier < 190) {
                                 shouldSprint = true;
                             }
                         } else if (teamHasInitiative && (this.role === 'LW' || this.role === 'RW' || this.role === 'ST' || this.role === 'CAM')) {
-                            // Desmarque ofensivo en bloque al acompañar el ataque
+                            // Desmarque ofensivo en bloque al acompañar el ataque o atacar el segundo palo
                             let oppGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
-                            if (Math.abs(oppGoalX - this.x) > 170 && this.stamina > 30) {
+                            if (Math.abs(oppGoalX - this.x) > 150 && this.stamina > 25) {
                                 shouldSprint = true;
                             }
                         }
@@ -2176,7 +2180,7 @@
 
                     if (shouldSprint && isMoving) {
                         // Jugadores explosivos (VEL/ACE altos) aprovechan mejor su velocidad punta en sprint
-                        let paceFactor = 0.88 + (this.stats.vel / 99) * 0.12;
+                        let paceFactor = 0.90 + (this.stats.vel / 99) * 0.12;
                         aiSpeedBase = this.sprintSpeed * paceFactor;
                         this.stamina = Math.max(0, this.stamina - sprintCost);
                     } else if (isMoving) {
@@ -2192,20 +2196,29 @@
                         let oppGoalY = FIELD_HEIGHT / 2;
                         let dirToGoal = this.team === 'blue' ? 1 : -1;
 
-                        // Buscar el mejor compañero desmarcado para asociarse (pase raso o aéreo por encima de rivales)
+                        // Buscar el mejor compañero desmarcado priorizando quienes tengan >= 20% de stamina y mayor energía
                         let bestMate = null;
                         let bestPassScore = -Infinity;
                         let bestPassNeedsLob = false;
 
-                        for (let mate of outfieldTeammates) {
-                            if (mate === this) continue;
+                        // Verificar si hay algún compañero con >= 20% de stamina para evitar pasarle a los exhaustos
+                        const availableHealthyMates = outfieldTeammates.filter(m => m !== this && m.stamina >= 20);
+                        const candidateMates = availableHealthyMates.length > 0 ? availableHealthyMates : outfieldTeammates.filter(m => m !== this);
+
+                        // Encontrar cuál candidato tiene la mayor stamina para darle bonificación prioritaria
+                        let maxMateStamina = 0;
+                        for (let m of candidateMates) {
+                            if (m.stamina > maxMateStamina) maxMateStamina = m.stamina;
+                        }
+
+                        for (let mate of candidateMates) {
                             let dMate = distance(this.x, this.y, mate.x, mate.y);
-                            if (dMate < 50 || dMate > 380) continue;
+                            if (dMate < 48 || dMate > 390) continue;
 
                             let mateOppDist = opponents.length > 0
                                 ? Math.min(...opponents.map(o => distance(mate.x, mate.y, o.x, o.y)))
                                 : 200;
-                            if (mateOppDist < 36) continue;
+                            if (mateOppDist < 34) continue;
 
                             // Verificar si hay rivales bloqueando la línea de pase raso
                             let passAngle = Math.atan2(mate.y - this.y, mate.x - this.x);
@@ -2218,18 +2231,28 @@
                                 return diff < 0.25;
                             });
 
-                            // Si el pase raso está bloqueado pero el compañero está desmarcado a media/larga distancia, considerar pase aéreo
-                            let needsLob = laneBlocked && dMate >= 125 && mateOppDist > 48;
+                            let needsLob = laneBlocked && dMate >= 120 && mateOppDist > 46;
                             if (laneBlocked && !needsLob) continue;
 
                             let advanceGain = (mate.x - this.x) * dirToGoal;
                             let mateGoalDist = distance(mate.x, mate.y, oppGoalX, oppGoalY);
                             let myGoalDist = distance(this.x, this.y, oppGoalX, oppGoalY);
 
-                            let score = mateOppDist * 0.65 + advanceGain * 0.48 - dMate * 0.1;
-                            if (mateGoalDist < myGoalDist - 30) score += 45;
-                            if (distToClosestOpp < 75) score += 55;
-                            if (needsLob) score += 18; // Recompensar cambio de orientación o pase bombeado por encima de la marca
+                            // Penalizar fuertemente pases hacia atrás si aún puede subir o no está acorralado
+                            let backwardPenalty = 0;
+                            if (advanceGain < -15) {
+                                backwardPenalty = distToClosestOpp > 62 ? -95 : -35;
+                            }
+
+                            // Priorizar fuertemente al jugador con más stamina (y penalizar si tiene < 20%)
+                            let staminaBonus = (mate.stamina / 100) * 65;
+                            if (mate.stamina >= maxMateStamina - 2) staminaBonus += 25;
+                            if (mate.stamina < 20) staminaBonus -= 180;
+
+                            let score = mateOppDist * 0.6 + advanceGain * 0.55 - dMate * 0.08 + staminaBonus + backwardPenalty;
+                            if (mateGoalDist < myGoalDist - 25) score += 45;
+                            if (distToClosestOpp < 68) score += 48;
+                            if (needsLob) score += 18;
 
                             if (score > bestPassScore) {
                                 bestPassScore = score;
@@ -2240,12 +2263,12 @@
 
                         if (currentDifficulty === 'competencia') {
                             // =========================================================
-                            // IA MODO COMPETENCIA: REGATES, ASOCIACIÓN (RASO Y AÉREO) Y TIROS ANGULADOS
+                            // IA MODO COMPETENCIA: PRIORIZA AVANZAR A PORTERÍA, ASOCIACIÓN CON STAMINA Y TIROS ANGULADOS
                             // =========================================================
 
                             // 1) REGATE INTELIGENTE BAJO PRESIÓN
                             if (this.dribbleCooldown <= 0 && this.stamina >= dribbleCost && distToClosestOpp < 58 && this.z === 0) {
-                                let skillBias = 0.055 + (this.stats.con / 99) * 0.075;
+                                let skillBias = 0.06 + (this.stats.con / 99) * 0.075;
                                 if (Math.random() < skillBias) {
                                     this.stamina -= dribbleCost;
                                     this.isDribbling = 20;
@@ -2266,20 +2289,20 @@
                                 }
                             }
 
-                            // 2) MOVIMIENTO TÁCTICO CON BALÓN
-                            let targetMoveX = oppGoalX - (90 * dirToGoal);
+                            // 2) MOVIMIENTO TÁCTICO: SIEMPRE INTENTAR SUBIR HACIA LA PORTERÍA ANTES DE MIRAR ATRÁS
+                            let targetMoveX = oppGoalX - (70 * dirToGoal);
                             let targetMoveY = this.y;
 
-                            if (distToClosestOpp < 75 && closestOpp) {
+                            if (distToClosestOpp < 72 && closestOpp) {
                                 let dodgeDirY = this.y >= closestOpp.y ? 1 : -1;
                                 if (this.y < 65) dodgeDirY = 1;
                                 if (this.y > FIELD_HEIGHT - 65) dodgeDirY = -1;
-                                targetMoveX = this.x + (100 * dirToGoal);
-                                targetMoveY = this.y + dodgeDirY * 85;
+                                targetMoveX = this.x + (115 * dirToGoal);
+                                targetMoveY = this.y + dodgeDirY * 80;
                             } else {
-                                if (this.y < GOAL_Y_START - 25) targetMoveY = GOAL_Y_START + 10;
-                                else if (this.y > GOAL_Y_END + 25) targetMoveY = GOAL_Y_END - 10;
-                                else targetMoveY = this.y + Math.sin((this.x + this.y) * 0.03) * 28;
+                                if (this.y < GOAL_Y_START - 25) targetMoveY = GOAL_Y_START + 12;
+                                else if (this.y > GOAL_Y_END + 25) targetMoveY = GOAL_Y_END - 12;
+                                else targetMoveY = this.y + Math.sin((this.x + this.y) * 0.03) * 24;
                             }
 
                             targetMoveX = Math.max(35, Math.min(FIELD_WIDTH - 35, targetMoveX));
@@ -2289,9 +2312,12 @@
                             let actionTaken = false;
                             let distToGoal = distance(this.x, this.y, oppGoalX, oppGoalY);
 
+                            // Evaluar si hay camino despejado hacia la portería para darle prioridad a avanzar
+                            let hasClearLaneToGoal = distToClosestOpp > 75 && distToGoal > 125;
+                            let passChance = distToClosestOpp < 64 ? 0.095 : (hasClearLaneToGoal ? 0.022 : 0.042);
+
                             // 3) PASE DE ASOCIACIÓN ENTRE COMPAÑEROS (RASO O AÉREO)
-                            let passChance = distToClosestOpp < 72 ? 0.11 : (distToGoal > 230 ? 0.068 : 0.042);
-                            if (bestMate && bestPassScore > 34 && Math.random() < passChance) {
+                            if (bestMate && bestPassScore > 42 && Math.random() < passChance) {
                                 let pAngle = Math.atan2(bestMate.y - this.y, bestMate.x - this.x);
                                 let dMate = distance(this.x, this.y, bestMate.x, bestMate.y);
                                 let useLob = (bestPassNeedsLob || (dMate > 215 && Math.random() < 0.45)) && this.stamina > 15;
@@ -2313,8 +2339,8 @@
 
                             // 4) TIROS A GOL CON ÁNGULOS VARIADOS Y EFECTO
                             if (!actionTaken && distToGoal < 330) {
-                                let baseShotProb = distToGoal < 165 ? 0.068 : (distToGoal < 245 ? 0.044 : 0.026);
-                                if (distToClosestOpp < 65 && distToGoal < 250) baseShotProb += 0.025;
+                                let baseShotProb = distToGoal < 155 ? 0.075 : (distToGoal < 235 ? 0.045 : 0.024);
+                                if (distToClosestOpp < 65 && distToGoal < 245) baseShotProb += 0.025;
 
                                 if (Math.random() < baseShotProb) {
                                     let oppGK = players.find(p => p.team !== this.team && p.isGK);
@@ -2368,17 +2394,17 @@
                             }
                         } else if (this.team === 'red') {
                             // =========================================================
-                            // IA MODO AMISTOSO (con mayor asociación de pases rasos y aéreos)
+                            // IA MODO AMISTOSO (prioriza avanzar y pasa al que tiene más stamina)
                             // =========================================================
                             let goalX = 0; let goalY = FIELD_HEIGHT / 2;
                             this.moveTo(goalX, goalY, aiSpeedBase);
 
                             let distToGoal = Math.hypot(goalX - this.x, goalY - this.y);
                             let passed = false;
+                            let hasClearLane = distToClosestOpp > 75 && distToGoal > 130;
 
-                            // El rival también busca asociarse con compañeros desmarcados (raso o aéreo)
-                            let friendlyPassChance = distToClosestOpp < 68 ? 0.085 : (distToGoal > 220 ? 0.052 : 0.03);
-                            if (bestMate && bestPassScore > 36 && Math.random() < friendlyPassChance) {
+                            let friendlyPassChance = distToClosestOpp < 62 ? 0.08 : (hasClearLane ? 0.02 : 0.036);
+                            if (bestMate && bestPassScore > 44 && Math.random() < friendlyPassChance) {
                                 let pAngle = Math.atan2(bestMate.y - this.y, bestMate.x - this.x);
                                 let dMate = distance(this.x, this.y, bestMate.x, bestMate.y);
                                 let useLob = (bestPassNeedsLob || (dMate > 220 && Math.random() < 0.4)) && this.stamina > 15;
@@ -2398,7 +2424,7 @@
                                 passed = true;
                             }
 
-                            if (!passed && distToGoal < 250 && Math.random() < 0.035) {
+                            if (!passed && distToGoal < 250 && Math.random() < 0.038) {
                                 let angle = Math.atan2(goalY - this.y, goalX - this.x);
                                 let powerRating = (this.stats.pot + this.stats.dis) / 2;
                                 ball.kick(Math.cos(angle) * this.shootForce, Math.sin(angle) * this.shootForce, true, false, 0, powerRating);
@@ -2429,34 +2455,66 @@
                             ? Math.max(75, Math.min(FIELD_WIDTH - 190, furthestOppX - 45))
                             : Math.min(FIELD_WIDTH - 75, Math.max(190, furthestOppX + 45));
 
+                        // Selección del último hombre: prioridad CB; si no hay CB, el CM con mayor Entrada (desempate por Potencia)
+                        const teamCBs = outfieldTeammates.filter(p => p.role === 'CB');
+                        let designatedLastMan = null;
+                        if (teamCBs.length > 0) {
+                            designatedLastMan = teamCBs.reduce((best, curr) => {
+                                if (curr.stats.ent !== best.stats.ent) return curr.stats.ent > best.stats.ent ? curr : best;
+                                return curr.stats.pot > best.stats.pot ? curr : best;
+                            });
+                        } else {
+                            const teamCMs = outfieldTeammates.filter(p => p.role === 'CM');
+                            const fallbackPool = teamCMs.length > 0 ? teamCMs : outfieldTeammates;
+                            if (fallbackPool.length > 0) {
+                                designatedLastMan = fallbackPool.reduce((best, curr) => {
+                                    if (curr.stats.ent !== best.stats.ent) return curr.stats.ent > best.stats.ent ? curr : best;
+                                    return curr.stats.pot > best.stats.pot ? curr : best;
+                                });
+                            }
+                        }
+
                         if (opposingGKHasBall && this.team !== ball.possessor.team) {
                             let retreatX = this.team === 'blue' ? FIELD_WIDTH * 0.35 : FIELD_WIDTH * 0.65;
                             targetX = retreatX;
                             targetY = this.startY;
                         } else if (!ball.possessor && this === closestTeammate) {
-                            // Si el balón viene por el aire, anticipar su punto de caída
-                            targetX = ball.z > 8 ? ball.x + ball.vx * 6 : ball.x;
-                            targetY = ball.z > 8 ? ball.y + ball.vy * 6 : ball.y;
+                            // Si el balón viene en pase hacia este jugador, abrirse un poco subiendo o hacia la banda antes de recibirlo
+                            let ballSpeed = Math.hypot(ball.vx, ball.vy);
+                            if (ball.lastTeam === this.team && ballSpeed > 2.5 && distToBall > 38) {
+                                let openSideY = this.y < FIELD_HEIGHT / 2 ? -26 : 26;
+                                if (this.y < 55) openSideY = 26;
+                                if (this.y > FIELD_HEIGHT - 55) openSideY = -26;
+                                targetX = (ball.x + ball.vx * 6) + (28 * dir);
+                                targetY = (ball.y + ball.vy * 6) + openSideY;
+                            } else {
+                                targetX = ball.z > 8 ? ball.x + ball.vx * 6 : ball.x;
+                                targetY = ball.z > 8 ? ball.y + ball.vy * 6 : ball.y;
+                            }
                         } else if (oppHasInitiative) {
                             // =========================================================
-                            // BAJAR COMO BLOQUE COMPACTO EN DEFENSA
+                            // BAJAR COMO BLOQUE COMPACTO EN DEFENSA CON SPRINTS Y BARRIDAS
                             // =========================================================
                             let focusTarget = ball.possessor || ball;
                             let ownGoalX = this.team === 'blue' ? 0 : FIELD_WIDTH;
                             let ownGoalY = FIELD_HEIGHT / 2;
 
-                            // Cuánto ha retrocedido el balón respecto al centro del campo (0 = mediocampo, 1 = área propia)
                             let defensiveDepth = this.team === 'blue'
                                 ? Math.max(0, Math.min(1, (FIELD_WIDTH * 0.55 - focusTarget.x) / (FIELD_WIDTH * 0.55)))
                                 : Math.max(0, Math.min(1, (focusTarget.x - FIELD_WIDTH * 0.45) / (FIELD_WIDTH * 0.55)));
 
-                            if (this === closestTeammate) {
+                            let distToFocus = distance(this.x, this.y, focusTarget.x, focusTarget.y);
+
+                            if (this === closestTeammate || distToFocus < 52) {
                                 // Presionar directamente al portador o interceptar su carrera
                                 targetX = focusTarget.x + (focusTarget.vx || 0) * 4;
                                 targetY = focusTarget.y + (focusTarget.vy || 0) * 4;
 
-                                if (this.actionTimer <= 0 && distance(this.x, this.y, focusTarget.x, focusTarget.y) < 40 && ball.z < 20) {
-                                    if (this.stamina > tackleCost && Math.random() < 0.045) {
+                                // Barrida defensiva más decidida cuando alcanza al rival en carrera o cerca del área
+                                if (this.actionTimer <= 0 && distToFocus < 46 && ball.z < 20) {
+                                    let inDangerZone = Math.abs(focusTarget.x - ownGoalX) < 320;
+                                    let slideChance = inDangerZone ? 0.085 : 0.06;
+                                    if (this.stamina > tackleCost && Math.random() < slideChance) {
                                         this.visualState = 'tackle';
                                         this.actionTimer = 20;
                                         this.stamina -= tackleCost;
@@ -2464,14 +2522,14 @@
                                         let tAngle = Math.atan2(focusTarget.y - this.y, focusTarget.x - this.x);
                                         this.tackleAngle = tAngle;
                                         this.facingAngle = tAngle;
-                                        this.vx = Math.cos(tAngle) * (this.sprintSpeed * 1.1);
-                                        this.vy = Math.sin(tAngle) * (this.sprintSpeed * 1.1);
+                                        this.vx = Math.cos(tAngle) * (this.sprintSpeed * 1.15);
+                                        this.vy = Math.sin(tAngle) * (this.sprintSpeed * 1.15);
 
                                         let isOppDribbling = focusTarget.isDribbling > 0;
-                                        let dribbleAdvantage = isOppDribbling ? (focusTarget.stats.con / 99) * 40 : 0;
+                                        let dribbleAdvantage = isOppDribbling ? (focusTarget.stats.con / 99) * 35 : 0;
 
-                                        if (this.stats.ent + (Math.random() * 20) > 80 + dribbleAdvantage) {
-                                            focusTarget.knockDown(this.x, this.y, 30, 3.0);
+                                        if (this.stats.ent + (Math.random() * 25) > 75 + dribbleAdvantage) {
+                                            focusTarget.knockDown(this.x, this.y, 32, 3.0);
                                             ball.possessor = this;
                                             ball.lastTeam = this.team;
                                         } else {
@@ -2479,30 +2537,32 @@
                                         }
                                     }
                                 }
-                            } else if (this.role === 'CB') {
-                                // El último defensa mantiene la línea justo detrás del rival más adelantado, basculando hacia el balón
+                            } else if (this === designatedLastMan || this.role === 'CB') {
                                 targetX = lastManLineX;
                                 targetY = FIELD_HEIGHT / 2 + (focusTarget.y - FIELD_HEIGHT / 2) * 0.45 + (this.startY - FIELD_HEIGHT / 2) * 0.35;
+                            } else if (this.role === 'ST') {
+                                // Si su equipo perdió el balón, el delantero baja hasta la media cancha para cerrar espacios
+                                let midFieldLineX = FIELD_WIDTH / 2 - (25 * dir);
+                                let trackX = focusTarget.x + (55 * dir);
+                                targetX = this.team === 'blue'
+                                    ? Math.max(midFieldLineX, Math.min(FIELD_WIDTH * 0.58, trackX))
+                                    : Math.min(midFieldLineX, Math.max(FIELD_WIDTH * 0.42, trackX));
+                                targetY = FIELD_HEIGHT / 2 + (focusTarget.y - FIELD_HEIGHT / 2) * 0.5;
                             } else if (Math.abs(focusTarget.x - ownGoalX) < 300 && (this.role === 'CDM' || distance(this.x, this.y, focusTarget.x, focusTarget.y) < 170)) {
-                                // Cobertura defensiva en la línea de tiro
                                 targetX = focusTarget.x * 0.65 + ownGoalX * 0.35;
                                 targetY = focusTarget.y * 0.65 + ownGoalY * 0.35;
                             } else {
-                                // Todo el bloque (medios, extremos y delanteros) repliega unido manteniendo distancias cortas
                                 let blockAnchorX = focusTarget.x - (55 * dir);
                                 let roleOffset = 0;
                                 if (this.role === 'CDM') roleOffset = -95 * dir;
                                 else if (this.role === 'CM') roleOffset = -45 * dir;
                                 else if (this.role === 'CAM') roleOffset = 15 * dir;
                                 else if (this.role === 'LW' || this.role === 'RW') roleOffset = 25 * dir;
-                                else if (this.role === 'ST') roleOffset = (85 - defensiveDepth * 45) * dir;
 
                                 targetX = blockAnchorX + roleOffset;
-                                // Asegurar que nadie quede más atrás que el último hombre sin necesidad
                                 if (this.team === 'blue' && targetX < lastManLineX + 25) targetX = lastManLineX + 25;
                                 if (this.team === 'red' && targetX > lastManLineX - 25) targetX = lastManLineX - 25;
 
-                                // Basculación vertical del bloque hacia el lado donde está el balón
                                 let laneY = mirrorOpp ? (mirrorOpp.y * 0.55 + this.startY * 0.45) : this.startY;
                                 targetY = laneY * 0.65 + focusTarget.y * 0.35;
 
@@ -2513,53 +2573,95 @@
                             }
                         } else if (teamHasInitiative) {
                             // =========================================================
-                            // SUBIR COMO BLOQUE COMPACTO EN ATAQUE (LÍNEA ADELANTADA)
+                            // SUBIR EN BLOQUE: APOYO AL SEGUNDO PALO, DESMARQUE A BANDA Y COBERTURA ATRÁS
                             // =========================================================
-                            let carrierX = ball.possessor ? ball.possessor.x : ball.x;
+                            let carrier = ball.possessor || ball;
+                            let carrierX = carrier.x;
+                            let carrierY = carrier.y;
+                            let oppGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
 
-                            if (this.role === 'CB') {
-                                // El último hombre sube con el equipo y se sitúa justo detrás del delantero rival más adelantado
-                                let supportMidX = carrierX - (180 * dir);
+                            // Límite de 3/4 de cancha para no subir solo al área chica sin apoyo
+                            let threeQuarterLineX = this.team === 'blue' ? FIELD_WIDTH * 0.75 : FIELD_WIDTH * 0.25;
+                            let hasAttackingSupport = outfieldTeammates.some(m =>
+                                m !== this && distance(m.x, m.y, oppGoalX, FIELD_HEIGHT / 2) < 290
+                            );
+
+                            // Elegir un jugador de apoyo para atacar el segundo palo / cazar el gol
+                            const attackers = outfieldTeammates.filter(p => p !== carrier && p !== designatedLastMan && p.role !== 'CB');
+                            let farPostRunner = null;
+                            if (attackers.length > 0) {
+                                farPostRunner = attackers.reduce((best, curr) => {
+                                    let scoreCurr = (curr.role === 'ST' || curr.role === 'LW' || curr.role === 'RW' || curr.role === 'CAM' ? 40 : 0) - Math.abs(curr.x - oppGoalX) * 0.1;
+                                    let scoreBest = (best.role === 'ST' || best.role === 'LW' || best.role === 'RW' || best.role === 'CAM' ? 40 : 0) - Math.abs(best.x - oppGoalX) * 0.1;
+                                    return scoreCurr > scoreBest ? curr : best;
+                                });
+                            }
+
+                            if (this === designatedLastMan || this.role === 'CB') {
+                                // El último hombre (CB o CM con más entrada/potencia) sube a apoyar el ataque en tres cuartos manteniendo cobertura
+                                let supportAttackX = carrierX - (110 * dir);
                                 if (this.team === 'blue') {
-                                    targetX = Math.max(lastManLineX, Math.min(FIELD_WIDTH * 0.62, supportMidX));
+                                    targetX = Math.max(lastManLineX, Math.min(FIELD_WIDTH * 0.68, supportAttackX));
                                 } else {
-                                    targetX = Math.min(lastManLineX, Math.max(FIELD_WIDTH * 0.38, supportMidX));
+                                    targetX = Math.min(lastManLineX, Math.max(FIELD_WIDTH * 0.32, supportAttackX));
                                 }
-                                targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.35 + (this.startY - FIELD_HEIGHT / 2) * 0.3;
+                                targetY = FIELD_HEIGHT / 2 + (carrierY - FIELD_HEIGHT / 2) * 0.4 + (this.startY - FIELD_HEIGHT / 2) * 0.25;
+                            } else if (this === farPostRunner) {
+                                // Atacar el segundo palo (lado opuesto al balón dentro del área rival) si hay compañía; si no, tope 3/4
+                                let farPostX = this.team === 'blue' ? FIELD_WIDTH - 92 : 92;
+                                let farPostY = carrierY < FIELD_HEIGHT / 2 ? GOAL_Y_END - 14 : GOAL_Y_START + 14;
+                                if (this.team === 'blue') {
+                                    targetX = Math.min(FIELD_WIDTH - 80, Math.max(carrierX + 85, farPostX));
+                                    if (!hasAttackingSupport && targetX > threeQuarterLineX) targetX = threeQuarterLineX;
+                                } else {
+                                    targetX = Math.max(80, Math.min(carrierX - 85, farPostX));
+                                    if (!hasAttackingSupport && targetX < threeQuarterLineX) targetX = threeQuarterLineX;
+                                }
+                                targetY = farPostY;
                             } else if (this.role === 'CDM') {
-                                // Pivote ofreciendo apoyo corto detrás del balón
-                                targetX = carrierX - (95 * dir);
+                                targetX = carrierX - (85 * dir);
                                 targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.45;
                             } else if (this.role === 'CM') {
-                                // Interior acompañando la jugada en línea de pase diagonal
-                                targetX = carrierX - (45 * dir);
-                                targetY = FIELD_HEIGHT / 2 + (this.startY - FIELD_HEIGHT / 2) * 0.55 + (ball.y - FIELD_HEIGHT / 2) * 0.25;
+                                // Abrirse a banda libre para ofrecer línea de pase adelantada
+                                let openFlankY = carrierY < FIELD_HEIGHT / 2 ? FIELD_HEIGHT - 85 : 85;
+                                targetX = carrierX + (45 * dir);
+                                targetY = openFlankY * 0.65 + (this.startY * 0.35);
                             } else if (this.role === 'CAM') {
-                                // Mediapunta atacando intervalos entre líneas
-                                targetX = carrierX + (65 * dir);
+                                targetX = carrierX + (75 * dir);
                                 targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.3;
                             } else if (this.role === 'LW' || this.role === 'RW') {
-                                // Extremos abriendo el campo y proyectándose al ataque en bloque
-                                let wingPush = numST === 1 ? 95 : (numCB <= 2 ? 40 : 65);
+                                let wingPush = numST === 1 ? 105 : (numCB <= 2 ? 55 : 75);
                                 targetX = carrierX + (wingPush * dir);
-                                targetY = this.role === 'LW' ? 68 : FIELD_HEIGHT - 68;
+                                if (!hasAttackingSupport) {
+                                    if (this.team === 'blue' && targetX > threeQuarterLineX) targetX = threeQuarterLineX;
+                                    if (this.team === 'red' && targetX < threeQuarterLineX) targetX = threeQuarterLineX;
+                                }
+                                targetY = this.role === 'LW' ? 58 : FIELD_HEIGHT - 58;
                             } else if (this.role === 'ST') {
-                                // Delantero centro fijando a los centrales y buscando desmarque al área
-                                let edgeOfBox = this.team === 'blue' ? FIELD_WIDTH - 125 : 125;
-                                targetX = carrierX + (115 * dir);
-                                if (this.team === 'blue' && targetX > edgeOfBox && carrierX < edgeOfBox) targetX = edgeOfBox;
-                                if (this.team === 'red' && targetX < edgeOfBox && carrierX > edgeOfBox) targetX = edgeOfBox;
+                                // El delantero nunca sube solo hasta el área chica: máximo 3/4 si no hay compañeros acompañando arriba
+                                let edgeOfBox = this.team === 'blue' ? FIELD_WIDTH - 115 : 115;
+                                targetX = carrierX + (120 * dir);
+                                if (this.team === 'blue') {
+                                    let maxForwardX = hasAttackingSupport ? edgeOfBox : threeQuarterLineX;
+                                    if (targetX > maxForwardX) targetX = maxForwardX;
+                                } else {
+                                    let maxForwardX = hasAttackingSupport ? edgeOfBox : threeQuarterLineX;
+                                    if (targetX < maxForwardX) targetX = maxForwardX;
+                                }
                                 targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.25;
                             }
 
+                            // Desmarque activo: si tiene un rival cerca, abrirse hacia la banda o subir a espacio libre
                             if (ball.possessor !== this && opponents.length > 0) {
                                 let nearestMark = opponents.reduce((prev, curr) =>
                                     distance(this.x, this.y, curr.x, curr.y) < distance(this.x, this.y, prev.x, prev.y) ? curr : prev
                                 );
-                                if (nearestMark && distance(this.x, this.y, nearestMark.x, nearestMark.y) < 68) {
-                                    let escapeAngle = Math.atan2(this.y - nearestMark.y, this.x - nearestMark.x);
-                                    targetX += Math.cos(escapeAngle) * 58;
-                                    targetY += Math.sin(escapeAngle) * 58;
+                                if (nearestMark && distance(this.x, this.y, nearestMark.x, nearestMark.y) < 75) {
+                                    let flankEscapeY = this.y < FIELD_HEIGHT / 2 ? -55 : 55;
+                                    if (this.y < 65) flankEscapeY = 55;
+                                    if (this.y > FIELD_HEIGHT - 65) flankEscapeY = -55;
+                                    targetX += 42 * dir;
+                                    targetY += flankEscapeY;
                                 }
                             }
                         }
