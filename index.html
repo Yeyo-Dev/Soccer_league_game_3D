@@ -74,6 +74,7 @@
                             <option value="5">5 vs 5</option>
                             <option value="7">7 vs 7</option>
                             <option value="test">Test (1v0)</option>
+                            <option value="test3v3">3vs3 Test (IA)</option>
                         </select>
                     </div>
                     <div>
@@ -1766,13 +1767,20 @@
 
                 if (this.stunTimer > 0) return;
 
-                let sprintCost = Math.max(0.1, 0.7 - (this.stats.fon / 99) * 0.3 - (this.stats.ace / 99) * 0.2);
-                let walkCost = Math.max(0.01, 0.1 - (this.stats.fon / 99) * 0.05);
-                let tackleCost = Math.max(5, 25 - (this.stats.ent / 99) * 15);
-                let dribbleCost = Math.max(2, 15 - (this.stats.con / 99) * 10);
-                let diveCost = Math.max(2, 15 - (this.stats.vel / 99) * 5);
+                // Escalado exponencial según Fondo (fon), Velocidad (vel) y Aceleración (ace)
+                const fonExp = Math.pow(this.stats.fon / 99, 2.35);
+                const velExp = Math.pow(this.stats.vel / 99, 2.15);
+                const aceExp = Math.pow(this.stats.ace / 99, 2.15);
+                const enduranceFactor = fonExp * 0.65 + (velExp * 0.5 + aceExp * 0.5) * 0.35;
 
-                let recoveryRate = 0.05 + (this.stamina / 100) * 0.35 + (this.stats.fon / 99) * 0.15;
+                // Duración base aumentada con fuerte diferenciación exponencial para jugadores con alto fondo/velocidad/aceleración
+                let sprintCost = Math.max(0.032, 0.44 * (1 - enduranceFactor * 0.86));
+                let walkCost = Math.max(0.004, 0.055 * (1 - fonExp * 0.85));
+                let tackleCost = Math.max(4, 22 - (this.stats.ent / 99) * 14);
+                let dribbleCost = Math.max(1.5, 13 - (this.stats.con / 99) * 9);
+                let diveCost = Math.max(2, 13 - velExp * 6);
+
+                let recoveryRate = 0.07 + (this.stamina / 100) * 0.32 + fonExp * 0.28 + (velExp + aceExp) * 0.06;
 
                 let exhaustFactor = 1.0;
                 if (this.stamina < 15) exhaustFactor = 0.4;
@@ -1782,7 +1790,7 @@
                 let opposingGKHasBall = (ball.possessor && ball.possessor.isGK && ball.possessor.team !== this.team);
 
                 if (this.isGK) {
-                    let maxHoldTime = currentMode === '3' ? 45 : 22;
+                    let maxHoldTime = (currentMode === '3' || currentMode === 'test3v3') ? 45 : 22;
 
                     if (ball.possessor === this) {
                         this.stamina = Math.min(100, this.stamina + recoveryRate);
@@ -1865,7 +1873,7 @@
                         }
                     }
                 }
-                else if (this.team === 'blue' && this.isActive) {
+                else if (this.team === 'blue' && this.isActive && currentMode !== 'test3v3') {
                     let dx = 0, dy = 0;
                     if (keys.w) dy -= 1;
                     if (keys.s) dy += 1;
@@ -2392,11 +2400,12 @@
                                     this.actionTimer = 16;
                                 }
                             }
-                        } else if (this.team === 'red') {
+                        } else if (this.team === 'red' || currentMode === 'test3v3') {
                             // =========================================================
-                            // IA MODO AMISTOSO (prioriza avanzar y pasa al que tiene más stamina)
+                            // IA MODO AMISTOSO (y equipo azul en 3vs3 Test IA vs IA)
                             // =========================================================
-                            let goalX = 0; let goalY = FIELD_HEIGHT / 2;
+                            let goalX = this.team === 'blue' ? FIELD_WIDTH : 0;
+                            let goalY = FIELD_HEIGHT / 2;
                             this.moveTo(goalX, goalY, aiSpeedBase);
 
                             let distToGoal = Math.hypot(goalX - this.x, goalY - this.y);
@@ -2756,6 +2765,18 @@
                     } else {
                         if (!ball.possessor) {
                             if (this.z > 5) {
+                                // Probabilidad estética de chilena según DIS (50% si DIS = 100) al rematar desde el aire
+                                const bicycleProb = (this.stats.dis / 100) * 0.5;
+                                const isShootingAir = (this.airAction === 'deflect' && this.headerTargetAngle !== null) ||
+                                                      !(this.airAction === 'control' || keys.k || (!this.isActive && Math.random() < 0.6));
+
+                                if (isShootingAir && Math.random() < bicycleProb) {
+                                    this.visualState = 'bicycle';
+                                    this.actionTimer = 24;
+                                    this.kickAngle = this.headerTargetAngle !== null ? this.headerTargetAngle : this.facingAngle;
+                                    if (this.vz < 2.2) this.vz = 2.6;
+                                }
+
                                 if (this.airAction === 'deflect' && this.headerTargetAngle !== null) {
                                     ball.possessor = null;
                                     ball.lastTeam = this.team;
@@ -2903,6 +2924,28 @@
                     leftArm.rotation.z = 0.85;
                     leftArm.rotation.x = -0.4;
                     rightArm.rotation.x = -legSwing * 0.5;
+                }
+                else if (this.visualState === 'bicycle') {
+                    // ANIMACIÓN DE CHILENA AÉREA (puramente estética)
+                    const maxFrames = 24;
+                    const p = Math.max(0, Math.min(1, 1 - (this.actionTimer / maxFrames)));
+                    bodyPivot.rotation.y = Math.PI / 2 - this.kickAngle;
+
+                    // Inversión acrobática de espaldas hacia atrás (-1.75 rad) y recuperación
+                    const arch = Math.sin(p * Math.PI);
+                    bodyPivot.rotation.x = -arch * 1.78;
+                    bodyPivot.rotation.z = arch * 0.25;
+                    bodyPivot.position.y = 0.85 + arch * 0.75;
+
+                    // Tijera con las piernas: derecha lanza el remate por encima, izquierda contrapesa
+                    rightLeg.rotation.x = -0.35 - Math.sin(p * Math.PI * 1.15) * 1.85;
+                    leftLeg.rotation.x = 0.55 - arch * 0.95;
+
+                    // Brazos abiertos para equilibrio acrobático en el aire
+                    leftArm.rotation.z = 0.95;
+                    rightArm.rotation.z = -0.95;
+                    leftArm.rotation.x = arch * 0.55;
+                    rightArm.rotation.x = arch * 0.55;
                 }
                 else if (this.visualState === 'tackle') {
                     // BARRIDA DIRECCIONAL: Pies apuntan hacia tackleAngle, cabeza atrás
@@ -3387,33 +3430,41 @@
         }
 
         function update() {
-            if (keys[' ']) {
-                let hasBall = (activeBluePlayer && ball.possessor === activeBluePlayer);
-                if (!hasBall) switchRandomPlayer();
-                keys[' '] = false;
-            }
-
-            for (let p of players) {
-                if (p.team === 'blue') p.isActive = false;
-            }
-
-            let closestBlue = null;
-            let minDist = Infinity;
-
-            if (ball.possessor && ball.possessor.team === 'blue' && !ball.possessor.isGK) {
-                activeBluePlayer = ball.possessor;
+            if (currentMode === 'test3v3') {
+                activeBluePlayer = null;
                 manualOverride = false;
-            } else if (!manualOverride) {
                 for (let p of players) {
-                    if (p.team === 'blue' && !p.isGK) {
-                        let d = distance(p.x, p.y, ball.x, ball.y);
-                        if (d < minDist) {
-                            minDist = d;
-                            closestBlue = p;
+                    if (p.team === 'blue') p.isActive = false;
+                }
+            } else {
+                if (keys[' ']) {
+                    let hasBall = (activeBluePlayer && ball.possessor === activeBluePlayer);
+                    if (!hasBall) switchRandomPlayer();
+                    keys[' '] = false;
+                }
+
+                for (let p of players) {
+                    if (p.team === 'blue') p.isActive = false;
+                }
+
+                let closestBlue = null;
+                let minDist = Infinity;
+
+                if (ball.possessor && ball.possessor.team === 'blue' && !ball.possessor.isGK) {
+                    activeBluePlayer = ball.possessor;
+                    manualOverride = false;
+                } else if (!manualOverride) {
+                    for (let p of players) {
+                        if (p.team === 'blue' && !p.isGK) {
+                            let d = distance(p.x, p.y, ball.x, ball.y);
+                            if (d < minDist) {
+                                minDist = d;
+                                closestBlue = p;
+                            }
                         }
                     }
+                    if (closestBlue) activeBluePlayer = closestBlue;
                 }
-                if (closestBlue) activeBluePlayer = closestBlue;
             }
 
             if (isTouchDevice) {
