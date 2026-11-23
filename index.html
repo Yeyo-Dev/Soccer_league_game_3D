@@ -333,6 +333,124 @@
             return tex;
         }
 
+        function buildDugoutBench(xCenter, zPos, accentColorHex, labelTitle) {
+            const benchGroup = new THREE.Group();
+            benchGroup.position.set(xCenter, 0, zPos);
+
+            const benchWidth = 11.5;
+            const benchDepth = 2.6;
+            const benchHeight = 3.6;
+
+            // Plataforma base de área técnica
+            const baseMat = new THREE.MeshStandardMaterial({ color: 0x0f172a, roughness: 0.85 });
+            const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(benchWidth + 0.8, 0.14, benchDepth + 0.8), baseMat);
+            baseMesh.position.set(0, 0.07, 0.2);
+            baseMesh.receiveShadow = true;
+            benchGroup.add(baseMesh);
+
+            // Franja frontal de color del equipo en la base
+            const trimMat = new THREE.MeshStandardMaterial({ color: accentColorHex, roughness: 0.4 });
+            const trimMesh = new THREE.Mesh(new THREE.BoxGeometry(benchWidth + 0.8, 0.16, 0.18), trimMat);
+            trimMesh.position.set(0, 0.08, (benchDepth + 0.8) / 2 + 0.2);
+            benchGroup.add(trimMesh);
+
+            // Estructura metálica (postes traseros, delanteros y travesaños)
+            const frameMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.7, roughness: 0.25 });
+            const postGeo = new THREE.CylinderGeometry(0.11, 0.11, benchHeight, 10);
+            [-benchWidth / 2, 0, benchWidth / 2].forEach(px => {
+                const backPost = new THREE.Mesh(postGeo, frameMat);
+                backPost.position.set(px, benchHeight / 2, -benchDepth / 2);
+                backPost.castShadow = true;
+                benchGroup.add(backPost);
+
+                const frontPost = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, benchHeight * 0.92, 10), frameMat);
+                frontPost.position.set(px, (benchHeight * 0.92) / 2, benchDepth * 0.35);
+                benchGroup.add(frontPost);
+            });
+
+            // Panel trasero translúcido
+            const glassMat = new THREE.MeshStandardMaterial({
+                color: 0x93c5fd,
+                transparent: true,
+                opacity: 0.22,
+                roughness: 0.15,
+                metalness: 0.1,
+                side: THREE.DoubleSide
+            });
+            const backGlass = new THREE.Mesh(new THREE.PlaneGeometry(benchWidth, benchHeight - 0.3), glassMat);
+            backGlass.position.set(0, benchHeight / 2, -benchDepth / 2 + 0.04);
+            benchGroup.add(backGlass);
+
+            // Paneles laterales translúcidos
+            [-benchWidth / 2, benchWidth / 2].forEach(sx => {
+                const sideGlass = new THREE.Mesh(new THREE.PlaneGeometry(benchDepth * 0.85, benchHeight - 0.3), glassMat);
+                sideGlass.rotation.y = Math.PI / 2;
+                sideGlass.position.set(sx, benchHeight / 2, -0.1);
+                benchGroup.add(sideGlass);
+            });
+
+            // Techo curvo / inclinado del banquillo
+            const roofMesh = new THREE.Mesh(new THREE.BoxGeometry(benchWidth + 0.5, 0.16, benchDepth + 0.6), glassMat);
+            roofMesh.position.set(0, benchHeight, -0.05);
+            roofMesh.rotation.x = 0.08;
+            benchGroup.add(roofMesh);
+
+            // Visera frontal con el nombre del banquillo
+            const headerCanvas = document.createElement('canvas');
+            headerCanvas.width = 512;
+            headerCanvas.height = 64;
+            const hCtx = headerCanvas.getContext('2d');
+            hCtx.fillStyle = '#0f172a';
+            hCtx.fillRect(0, 0, 512, 64);
+            hCtx.fillStyle = '#' + accentColorHex.toString(16).padStart(6, '0');
+            hCtx.fillRect(0, 54, 512, 10);
+            hCtx.fillStyle = '#ffffff';
+            hCtx.font = 'bold 28px Inter, sans-serif';
+            hCtx.textAlign = 'center';
+            hCtx.textBaseline = 'middle';
+            hCtx.fillText(labelTitle, 256, 30);
+
+            const headerTex = new THREE.CanvasTexture(headerCanvas);
+            const visorMesh = new THREE.Mesh(
+                new THREE.BoxGeometry(benchWidth + 0.5, 0.48, 0.16),
+                new THREE.MeshStandardMaterial({ map: headerTex, roughness: 0.35 })
+            );
+            visorMesh.position.set(0, benchHeight - 0.18, benchDepth * 0.35 + 0.1);
+            benchGroup.add(visorMesh);
+
+            // Barra de soporte y 3 butacas acolchadas para los suplentes
+            const seatBar = new THREE.Mesh(new THREE.BoxGeometry(benchWidth - 0.4, 0.18, 0.25), frameMat);
+            seatBar.position.set(0, 0.72, -0.35);
+            benchGroup.add(seatBar);
+
+            const seatMat = new THREE.MeshStandardMaterial({ color: accentColorHex, roughness: 0.45 });
+            const seatTrimMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
+
+            [-3.4, 0, 3.4].forEach(seatX => {
+                // Cojín asiento
+                const cushion = new THREE.Mesh(new THREE.BoxGeometry(1.75, 0.22, 1.35), seatMat);
+                cushion.position.set(seatX, 0.92, -0.25);
+                cushion.castShadow = true;
+                cushion.receiveShadow = true;
+                benchGroup.add(cushion);
+
+                // Respaldo
+                const backrest = new THREE.Mesh(new THREE.BoxGeometry(1.75, 1.85, 0.24), seatMat);
+                backrest.position.set(seatX, 1.85, -0.88);
+                backrest.rotation.x = -0.08;
+                backrest.castShadow = true;
+                benchGroup.add(backrest);
+
+                // Cabecera oscura
+                const headrest = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.42, 0.28), seatTrimMat);
+                headrest.position.set(seatX, 2.75, -0.94);
+                benchGroup.add(headrest);
+            });
+
+            scene.add(benchGroup);
+            return benchGroup;
+        }
+
         function buildStadium() {
             const pitchW = FIELD_WIDTH * SCALE;  // 80
             const pitchD = FIELD_HEIGHT * SCALE; // 45
@@ -358,17 +476,29 @@
             surroundMesh.receiveShadow = true;
             scene.add(surroundMesh);
 
-            // Vallas publicitarias perimetrales
+            // Vallas publicitarias perimetrales (abiertas en el centro norte para dejar vista limpia a los banquillos)
             const boardMat = new THREE.MeshStandardMaterial({ color: 0x1e3a8a, roughness: 0.4 });
             const boardMatAccent = new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x1d4ed8, emissiveIntensity: 0.3 });
             
-            const northBoard = new THREE.Mesh(new THREE.BoxGeometry(86, 1.4, 0.6), boardMatAccent);
-            northBoard.position.set(0, 0.7, -pitchD / 2 - 2.5);
-            scene.add(northBoard);
+            const northBoardLeft = new THREE.Mesh(new THREE.BoxGeometry(19, 1.15, 0.5), boardMatAccent);
+            northBoardLeft.position.set(-33.5, 0.58, -pitchD / 2 - 1.3);
+            scene.add(northBoardLeft);
+
+            const northBoardCenter = new THREE.Mesh(new THREE.BoxGeometry(17, 1.15, 0.5), boardMatAccent);
+            northBoardCenter.position.set(0, 0.58, -pitchD / 2 - 1.3);
+            scene.add(northBoardCenter);
+
+            const northBoardRight = new THREE.Mesh(new THREE.BoxGeometry(19, 1.15, 0.5), boardMatAccent);
+            northBoardRight.position.set(33.5, 0.58, -pitchD / 2 - 1.3);
+            scene.add(northBoardRight);
 
             const southBoard = new THREE.Mesh(new THREE.BoxGeometry(86, 1.4, 0.6), boardMat);
             southBoard.position.set(0, 0.7, pitchD / 2 + 2.5);
             scene.add(southBoard);
+
+            // Dos banquillos de suplentes en el lado norte (z ≈ -25.2), uno a cada lado del mediocampo
+            buildDugoutBench(-16, -25.2, 0x2563eb, 'BANCA LOCAL');
+            buildDugoutBench(16, -25.2, 0xdc2626, 'BANCA RIVAL');
 
             // Porterías 3D (Izquierda x = -40, Derecha x = +40)
             const goalHeight = 3.5; // 35 unidades lógicas en Z
@@ -434,7 +564,7 @@
             const standMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.9 });
             const tierAccentMat = new THREE.MeshStandardMaterial({ color: 0x312e81, roughness: 0.7 });
             [
-                { w: 94, h: 6, d: 8, x: 0, y: 3, z: -31 },
+                { w: 94, h: 6, d: 8, x: 0, y: 3, z: -32.5 },
                 { w: 94, h: 6, d: 8, x: 0, y: 3, z: 31 },
                 { w: 8, h: 6, d: 62, x: -50, y: 3, z: 0 },
                 { w: 8, h: 6, d: 62, x: 50, y: 3, z: 0 }
@@ -656,7 +786,7 @@
         };
 
         // ==========================================
-        // 6. MODELOS 3D DE BALÓN Y JUGADORES
+        // 6. MODELOS 3D DE BALÓN, JUGADORES Y BANQUILLO
         // ==========================================
         function createSoccerBallTexture() {
             const c = document.createElement('canvas');
@@ -807,6 +937,179 @@
             };
             sprite.userData.updateLabel(100, false);
             return sprite;
+        }
+
+        function createBenchLabelSprite(shortName, teamSide) {
+            const c = document.createElement('canvas');
+            c.width = 192;
+            c.height = 56;
+            const ctx = c.getContext('2d');
+            ctx.fillStyle = teamSide === 'blue' ? 'rgba(30, 58, 138, 0.85)' : 'rgba(127, 29, 29, 0.85)';
+            ctx.beginPath();
+            ctx.roundRect(24, 8, 144, 38, 12);
+            ctx.fill();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 22px Inter, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(shortName, 96, 27);
+
+            const tex = new THREE.CanvasTexture(c);
+            const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false });
+            const sprite = new THREE.Sprite(mat);
+            sprite.scale.set(3.2, 0.95, 1);
+            return sprite;
+        }
+
+        function buildBenchPlayer3DMesh(charData, teamSide, xPos, zPos) {
+            const root = new THREE.Group();
+            root.position.set(xPos, 0, zPos);
+
+            const bodyPivot = new THREE.Group();
+            root.add(bodyPivot);
+
+            const skinHex = charData.skin === 'light' ? 0xffdcc4 : 0x4a2c18;
+            const skinMat = new THREE.MeshStandardMaterial({ color: skinHex, roughness: 0.6 });
+
+            const plainKitTex = createJerseySideTexture(charData.team, false, teamSide, null, false);
+            const frontKitTex = createJerseySideTexture(charData.team, false, teamSide, charData.num, false);
+            const backKitTex = createJerseySideTexture(charData.team, false, teamSide, charData.num, true);
+
+            const jerseyMat = new THREE.MeshStandardMaterial({ map: plainKitTex, roughness: 0.5 });
+            const frontJerseyMat = new THREE.MeshStandardMaterial({ map: frontKitTex, roughness: 0.5 });
+            const backJerseyMat = new THREE.MeshStandardMaterial({ map: backKitTex, roughness: 0.5 });
+
+            const torsoMaterials = [
+                jerseyMat,
+                jerseyMat,
+                jerseyMat,
+                jerseyMat,
+                frontJerseyMat,
+                backJerseyMat
+            ];
+
+            let shortsColor = 0x0f172a;
+            if (charData.team === 'rm' || charData.team === 'mci') shortsColor = 0xffffff;
+            else if (charData.team === 'bar') shortsColor = 0x1d428a;
+            else if (charData.team === 'psg') shortsColor = 0x00143f;
+            else if (charData.team === 'bay') shortsColor = 0xc8102e;
+
+            const shortsMat = new THREE.MeshStandardMaterial({ color: shortsColor, roughness: 0.6 });
+            const bootMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.3 });
+
+            const hairPalette = {
+                blonde: 0xe6c253,
+                brown: 0x5c3a21,
+                ginger: 0xb45309,
+                black: 0x171717
+            };
+            const hairHex = hairPalette[charData.hair] || 0x1e293b;
+            const hairMat = new THREE.MeshStandardMaterial({ color: hairHex, roughness: 0.75 });
+
+            // Cadera apoyada sobre el cojín de la butaca (y = 1.15, mirando hacia +Z)
+            const pelvis = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.42, 0.65), shortsMat);
+            pelvis.position.set(0, 1.18, -0.2);
+            pelvis.castShadow = true;
+            bodyPivot.add(pelvis);
+
+            // Torso apoyado en el respaldo
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(1.15, 1.32, 0.65), torsoMaterials);
+            torso.position.set(0, 1.98, -0.26);
+            torso.castShadow = true;
+            bodyPivot.add(torso);
+
+            // Grupo de cabeza + pelo articulado para poder agachar la cabeza ante goles en contra
+            const headGroup = new THREE.Group();
+            headGroup.position.set(0, 2.75, -0.24);
+
+            const head = new THREE.Mesh(new THREE.SphereGeometry(0.47, 16, 16), skinMat);
+            head.position.set(0, 0.32, 0.02);
+            head.castShadow = true;
+            headGroup.add(head);
+
+            const hair = new THREE.Mesh(new THREE.SphereGeometry(0.49, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.55), hairMat);
+            hair.position.set(0, 0.37, -0.02);
+            headGroup.add(hair);
+
+            bodyPivot.add(headGroup);
+
+            // Piernas en pose sentada (~90°: muslos horizontales hacia +Z, pantorrillas verticales hacia abajo)
+            function makeSeatedLeg(xOffset) {
+                const hipPivot = new THREE.Group();
+                hipPivot.position.set(xOffset, 1.16, 0.05);
+
+                // Muslo horizontal hacia adelante (+Z)
+                const thigh = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.38, 0.72), shortsMat);
+                thigh.position.set(0, 0, 0.32);
+                thigh.castShadow = true;
+                hipPivot.add(thigh);
+
+                // Rodilla / pantorrilla doblada ~90° hacia abajo (-Y)
+                const kneePivot = new THREE.Group();
+                kneePivot.position.set(0, -0.04, 0.64);
+
+                const calf = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.78, 0.36), skinMat);
+                calf.position.set(0, -0.38, 0);
+                calf.castShadow = true;
+                kneePivot.add(calf);
+
+                const boot = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.22, 0.56), bootMat);
+                boot.position.set(0, -0.82, 0.1);
+                boot.castShadow = true;
+                kneePivot.add(boot);
+
+                hipPivot.add(kneePivot);
+                return hipPivot;
+            }
+
+            const leftLeg = makeSeatedLeg(-0.32);
+            const rightLeg = makeSeatedLeg(0.32);
+            bodyPivot.add(leftLeg);
+            bodyPivot.add(rightLeg);
+
+            // Brazos articulados (por defecto descansando relajados sobre los muslos)
+            function makeSeatedArm(xOffset) {
+                const armPivot = new THREE.Group();
+                armPivot.position.set(xOffset, 2.52, -0.22);
+
+                const sleeve = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.4, 0.36), jerseyMat);
+                sleeve.position.y = -0.18;
+                armPivot.add(sleeve);
+
+                const forearm = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.56, 0.3), skinMat);
+                forearm.position.y = -0.62;
+                forearm.castShadow = true;
+                armPivot.add(forearm);
+                return armPivot;
+            }
+
+            const leftArm = makeSeatedArm(-0.76);
+            const rightArm = makeSeatedArm(0.76);
+            leftArm.rotation.set(-0.42, 0, 0.12);
+            rightArm.rotation.set(-0.42, 0, -0.12);
+            bodyPivot.add(leftArm);
+            bodyPivot.add(rightArm);
+
+            // Etiqueta discreta encima del suplente
+            const labelSprite = createBenchLabelSprite(charData.short, teamSide);
+            labelSprite.position.set(0, 4.15, -0.15);
+            root.add(labelSprite);
+
+            scene.add(root);
+
+            return {
+                root,
+                bodyPivot,
+                headGroup,
+                leftArm,
+                rightArm,
+                team: teamSide,
+                charData
+            };
         }
 
         function buildPlayer3DMesh(player) {
@@ -962,12 +1265,17 @@
         }
 
         // ==========================================
-        // 7. LÓGICA DEL JUEGO (PRESERVADA AL 100%)
+        // 7. LÓGICA DEL JUEGO Y REACCIONES EN BANCA
         // ==========================================
         let matchTimer = 300;
         let timerInterval = null;
         let matchStats = { blue: { goals: {}, assists: {} }, red: { goals: {}, assists: {} } };
         let isMatchEnded = false;
+
+        // Estado de suplentes sentados y sus reacciones ante goles
+        let benchPlayers = [];
+        let benchReactionTimer = 0;
+        let benchLastScoringTeam = null;
 
         const pauseBtn = document.getElementById('pauseBtn');
         const pauseOverlay = document.getElementById('pauseOverlay');
@@ -1028,6 +1336,11 @@
 
         function processGoal(scoringTeam) {
             showGoalBanner();
+
+            // Activar reacción de los 3 suplentes de cada banca (~3.5 segundos = 210 frames)
+            benchLastScoringTeam = scoringTeam;
+            benchReactionTimer = 210;
+
             let history = ball.touchHistory.filter(t => t.player.team === scoringTeam);
             let elapsed = 300 - matchTimer;
             let timeStr = formatTime(elapsed);
@@ -2548,6 +2861,34 @@
             pauseBtn.classList.add('hidden');
         }
 
+        function rebuildBenchPlayers(myTeamId, rivalTeamId, activeBlueIds, activeRedIds) {
+            benchPlayers.forEach(bp => scene.remove(bp.root));
+            benchPlayers = [];
+
+            const seatOffsets = [-3.4, 0, 3.4];
+            const benchZ = -25.2;
+
+            // Suplentes equipo LOCAL (izquierda, x ≈ -16)
+            const localSubs = Object.values(characterDB)
+                .filter(c => c.team === myTeamId && !c.isGK && !activeBlueIds.has(c.id))
+                .slice(0, 3);
+
+            localSubs.forEach((charData, idx) => {
+                const subRig = buildBenchPlayer3DMesh(charData, 'blue', -16 + seatOffsets[idx], benchZ);
+                benchPlayers.push(subRig);
+            });
+
+            // Suplentes equipo RIVAL (derecha, x ≈ +16)
+            const rivalSubs = Object.values(characterDB)
+                .filter(c => c.team === rivalTeamId && !c.isGK && !activeRedIds.has(c.id))
+                .slice(0, 3);
+
+            rivalSubs.forEach((charData, idx) => {
+                const subRig = buildBenchPlayer3DMesh(charData, 'red', 16 + seatOffsets[idx], benchZ);
+                benchPlayers.push(subRig);
+            });
+        }
+
         function resetPositions(autoStart = true) {
             if (ball) ball.destroy3D();
             players.forEach(p => p.destroy3D());
@@ -2579,7 +2920,9 @@
 
             // Jugadores Locales
             let blueCounts = {};
+            const activeBlueIds = new Set();
             blueTeamSetup.forEach(item => {
+                activeBlueIds.add(item.char.id);
                 blueCounts[item.role] = (blueCounts[item.role] || 0) + 1;
                 let c = blueCounts[item.role];
                 let pos = { x: 0, y: 0 };
@@ -2600,6 +2943,7 @@
             });
 
             // Jugadores Rivales (excepto en Test 1v0)
+            const activeRedIds = new Set();
             if (currentMode !== 'test') {
                 let rivalPlayersData = Object.values(characterDB).filter(c => c.team === rivalTeamId && !c.isGK);
                 let count = currentMode === '7' ? 7 : (currentMode === '5' ? 5 : 3);
@@ -2608,6 +2952,7 @@
                 let redRoles = assignRoles(redCharsData, currentMode);
                 let redCounts = {};
                 redRoles.forEach(item => {
+                    activeRedIds.add(item.char.id);
                     redCounts[item.role] = (redCounts[item.role] || 0) + 1;
                     let c = redCounts[item.role];
                     let pos = { x: 0, y: 0 };
@@ -2623,6 +2968,9 @@
                     players.push(new Player(FIELD_WIDTH - pos.x, pos.y, '#DC2626', 'red', item.char, item.role));
                 });
             }
+
+            // Construir los 3 suplentes por equipo sentados en la banca norte
+            rebuildBenchPlayers(myTeamId, rivalTeamId, activeBlueIds, activeRedIds);
 
             isPaused = true;
             if (autoStart) {
@@ -2767,6 +3115,47 @@
             ball.update();
         }
 
+        function updateBench3D() {
+            if (benchReactionTimer > 0) {
+                benchReactionTimer--;
+            } else {
+                benchLastScoringTeam = null;
+            }
+
+            for (let bp of benchPlayers) {
+                // Postura sentada por defecto viendo el partido
+                let targetBodyRotX = 0;
+                let targetHeadRotX = 0;
+                let targetLeftArmX = -0.42;
+                let targetRightArmX = -0.42;
+                let targetLeftArmZ = 0.12;
+                let targetRightArmZ = -0.12;
+
+                if (benchReactionTimer > 0 && benchLastScoringTeam) {
+                    if (bp.team === benchLastScoringTeam) {
+                        // Celebración: ambos brazos levantados al cielo
+                        targetLeftArmX = -2.8;
+                        targetRightArmX = -2.8;
+                        targetLeftArmZ = 0.25;
+                        targetRightArmZ = -0.25;
+                        targetHeadRotX = -0.18;
+                    } else {
+                        // Decepción: cabeza agachada y torso ligeramente encorvado hacia adelante
+                        targetHeadRotX = 0.55;
+                        targetBodyRotX = 0.25;
+                    }
+                }
+
+                // Interpolación suave hacia la pose objetivo
+                bp.bodyPivot.rotation.x += (targetBodyRotX - bp.bodyPivot.rotation.x) * 0.16;
+                bp.headGroup.rotation.x += (targetHeadRotX - bp.headGroup.rotation.x) * 0.16;
+                bp.leftArm.rotation.x += (targetLeftArmX - bp.leftArm.rotation.x) * 0.18;
+                bp.rightArm.rotation.x += (targetRightArmX - bp.rightArm.rotation.x) * 0.18;
+                bp.leftArm.rotation.z += (targetLeftArmZ - bp.leftArm.rotation.z) * 0.18;
+                bp.rightArm.rotation.z += (targetRightArmZ - bp.rightArm.rotation.z) * 0.18;
+            }
+        }
+
         function updateCamera3D() {
             if (!ball) return;
             const bx = to3DX(ball.x);
@@ -2794,6 +3183,7 @@
         function render3D() {
             if (ball) ball.sync3D();
             for (let p of players) p.sync3D();
+            updateBench3D();
 
             // Indicador 3D de objetivo de pase
             if (activeBluePlayer && ball && ball.possessor === activeBluePlayer && activeBluePlayer.passTarget) {
