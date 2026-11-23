@@ -6,10 +6,9 @@ Champions League: Dreams 3D is a personal game development project focused on cr
 
 ## Preview
 
-\<!-- Add gameplay screenshots here -->
-![Gameplay]\(./gameplay.png)
-![Gameplay]\(./gameplay1.png)
-![Gameplay]\(./gameplay2.png)
+![Gameplay]\(./gameplay.jpg)
+![Gameplay]\(./gameplay1.jpg)
+![Gameplay]\(./gameplay2.jpg)
 ## Features
 
 - **3D Football Environment:** A stadium, pitch, goals, players, and ball rendered with Three.js.
