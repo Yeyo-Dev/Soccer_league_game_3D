@@ -76,6 +76,13 @@
                             <option value="test">Test (1v0)</option>
                         </select>
                     </div>
+                    <div>
+                        <label class="block text-gray-400 mb-1.5 text-xs font-bold uppercase tracking-wider text-center">Dificultad</label>
+                        <select id="difficultySelect" class="bg-gray-700 text-white p-2.5 rounded-xl border border-gray-600 w-36 outline-none focus:border-amber-400 transition-colors font-semibold">
+                            <option value="amistoso">Amistoso</option>
+                            <option value="competencia">Competencia</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="mb-5 text-center">
@@ -2158,10 +2165,10 @@
                             if (this === closestTeammate || (ballNearOwnGoal && distToBall < 240)) {
                                 shouldSprint = true;
                             }
-                        } else if (teamHasInitiative && (this.role === 'LW' || this.role === 'RW' || this.role === 'ST')) {
-                            // Desmarque ofensivo de delanteros y extremos al contraataque
+                        } else if (teamHasInitiative && (this.role === 'LW' || this.role === 'RW' || this.role === 'ST' || this.role === 'CAM')) {
+                            // Desmarque ofensivo en bloque al acompañar el ataque
                             let oppGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
-                            if (Math.abs(oppGoalX - this.x) > 190 && this.stamina > 35) {
+                            if (Math.abs(oppGoalX - this.x) > 170 && this.stamina > 30) {
                                 shouldSprint = true;
                             }
                         }
@@ -2180,21 +2187,231 @@
 
                     aiSpeedBase *= exhaustFactor;
 
-                    if (this.team === 'red' && ball.possessor === this) {
-                        let goalX = 0; let goalY = FIELD_HEIGHT / 2;
-                        this.moveTo(goalX, goalY, aiSpeedBase);
-                        if (Math.hypot(goalX - this.x, goalY - this.y) < 250 && Math.random() < 0.035) {
-                            let angle = Math.atan2(goalY - this.y, goalX - this.x);
-                            let powerRating = (this.stats.pot + this.stats.dis) / 2;
-                            ball.kick(Math.cos(angle) * this.shootForce, Math.sin(angle) * this.shootForce, true, false, 0, powerRating);
-                            this.kickAngle = angle;
-                            this.facingAngle = angle;
-                            this.visualState = 'kick';
-                            this.actionTimer = 16;
+                    if (ball.possessor === this) {
+                        let oppGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
+                        let oppGoalY = FIELD_HEIGHT / 2;
+                        let dirToGoal = this.team === 'blue' ? 1 : -1;
+
+                        // Buscar el mejor compañero desmarcado para asociarse (pase raso o aéreo por encima de rivales)
+                        let bestMate = null;
+                        let bestPassScore = -Infinity;
+                        let bestPassNeedsLob = false;
+
+                        for (let mate of outfieldTeammates) {
+                            if (mate === this) continue;
+                            let dMate = distance(this.x, this.y, mate.x, mate.y);
+                            if (dMate < 50 || dMate > 380) continue;
+
+                            let mateOppDist = opponents.length > 0
+                                ? Math.min(...opponents.map(o => distance(mate.x, mate.y, o.x, o.y)))
+                                : 200;
+                            if (mateOppDist < 36) continue;
+
+                            // Verificar si hay rivales bloqueando la línea de pase raso
+                            let passAngle = Math.atan2(mate.y - this.y, mate.x - this.x);
+                            let laneBlocked = opponents.some(o => {
+                                let dOpp = distance(this.x, this.y, o.x, o.y);
+                                if (dOpp >= dMate - 10) return false;
+                                let angOpp = Math.atan2(o.y - this.y, o.x - this.x);
+                                let diff = Math.abs(angOpp - passAngle);
+                                if (diff > Math.PI) diff = 2 * Math.PI - diff;
+                                return diff < 0.25;
+                            });
+
+                            // Si el pase raso está bloqueado pero el compañero está desmarcado a media/larga distancia, considerar pase aéreo
+                            let needsLob = laneBlocked && dMate >= 125 && mateOppDist > 48;
+                            if (laneBlocked && !needsLob) continue;
+
+                            let advanceGain = (mate.x - this.x) * dirToGoal;
+                            let mateGoalDist = distance(mate.x, mate.y, oppGoalX, oppGoalY);
+                            let myGoalDist = distance(this.x, this.y, oppGoalX, oppGoalY);
+
+                            let score = mateOppDist * 0.65 + advanceGain * 0.48 - dMate * 0.1;
+                            if (mateGoalDist < myGoalDist - 30) score += 45;
+                            if (distToClosestOpp < 75) score += 55;
+                            if (needsLob) score += 18; // Recompensar cambio de orientación o pase bombeado por encima de la marca
+
+                            if (score > bestPassScore) {
+                                bestPassScore = score;
+                                bestMate = mate;
+                                bestPassNeedsLob = needsLob;
+                            }
+                        }
+
+                        if (currentDifficulty === 'competencia') {
+                            // =========================================================
+                            // IA MODO COMPETENCIA: REGATES, ASOCIACIÓN (RASO Y AÉREO) Y TIROS ANGULADOS
+                            // =========================================================
+
+                            // 1) REGATE INTELIGENTE BAJO PRESIÓN
+                            if (this.dribbleCooldown <= 0 && this.stamina >= dribbleCost && distToClosestOpp < 58 && this.z === 0) {
+                                let skillBias = 0.055 + (this.stats.con / 99) * 0.075;
+                                if (Math.random() < skillBias) {
+                                    this.stamina -= dribbleCost;
+                                    this.isDribbling = 20;
+                                    this.dribbleCooldown = 46;
+                                    this.visualState = 'dribble';
+                                    this.actionTimer = 20;
+                                    this.dribbleType = Math.floor(Math.random() * 3) + 1;
+
+                                    let combinedPot = getCombinedStat(this, 'pot');
+                                    for (let opp of players) {
+                                        if (opp.team !== this.team && distance(this.x, this.y, opp.x, opp.y) < 42) {
+                                            let oppPot = getCombinedStat(opp, 'pot');
+                                            if (combinedPot + (Math.random() * 12) > oppPot) {
+                                                opp.knockDown(this.x, this.y, 20, 2.4);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2) MOVIMIENTO TÁCTICO CON BALÓN
+                            let targetMoveX = oppGoalX - (90 * dirToGoal);
+                            let targetMoveY = this.y;
+
+                            if (distToClosestOpp < 75 && closestOpp) {
+                                let dodgeDirY = this.y >= closestOpp.y ? 1 : -1;
+                                if (this.y < 65) dodgeDirY = 1;
+                                if (this.y > FIELD_HEIGHT - 65) dodgeDirY = -1;
+                                targetMoveX = this.x + (100 * dirToGoal);
+                                targetMoveY = this.y + dodgeDirY * 85;
+                            } else {
+                                if (this.y < GOAL_Y_START - 25) targetMoveY = GOAL_Y_START + 10;
+                                else if (this.y > GOAL_Y_END + 25) targetMoveY = GOAL_Y_END - 10;
+                                else targetMoveY = this.y + Math.sin((this.x + this.y) * 0.03) * 28;
+                            }
+
+                            targetMoveX = Math.max(35, Math.min(FIELD_WIDTH - 35, targetMoveX));
+                            targetMoveY = Math.max(35, Math.min(FIELD_HEIGHT - 35, targetMoveY));
+                            this.moveTo(targetMoveX, targetMoveY, aiSpeedBase);
+
+                            let actionTaken = false;
+                            let distToGoal = distance(this.x, this.y, oppGoalX, oppGoalY);
+
+                            // 3) PASE DE ASOCIACIÓN ENTRE COMPAÑEROS (RASO O AÉREO)
+                            let passChance = distToClosestOpp < 72 ? 0.11 : (distToGoal > 230 ? 0.068 : 0.042);
+                            if (bestMate && bestPassScore > 34 && Math.random() < passChance) {
+                                let pAngle = Math.atan2(bestMate.y - this.y, bestMate.x - this.x);
+                                let dMate = distance(this.x, this.y, bestMate.x, bestMate.y);
+                                let useLob = (bestPassNeedsLob || (dMate > 215 && Math.random() < 0.45)) && this.stamina > 15;
+                                if (useLob) this.stamina = Math.max(0, this.stamina - 8);
+
+                                ball.kick(
+                                    Math.cos(pAngle) * this.passForce * (useLob ? 0.78 : 1.0),
+                                    Math.sin(pAngle) * this.passForce * (useLob ? 0.78 : 1.0),
+                                    false,
+                                    useLob,
+                                    0
+                                );
+                                this.kickAngle = pAngle;
+                                this.facingAngle = pAngle;
+                                this.visualState = 'kick';
+                                this.actionTimer = 14;
+                                actionTaken = true;
+                            }
+
+                            // 4) TIROS A GOL CON ÁNGULOS VARIADOS Y EFECTO
+                            if (!actionTaken && distToGoal < 330) {
+                                let baseShotProb = distToGoal < 165 ? 0.068 : (distToGoal < 245 ? 0.044 : 0.026);
+                                if (distToClosestOpp < 65 && distToGoal < 250) baseShotProb += 0.025;
+
+                                if (Math.random() < baseShotProb) {
+                                    let oppGK = players.find(p => p.team !== this.team && p.isGK);
+                                    let targetY = oppGoalY;
+
+                                    let cornerChoice = Math.random();
+                                    if (oppGK) {
+                                        if (cornerChoice < 0.65) {
+                                            targetY = oppGK.y < FIELD_HEIGHT / 2
+                                                ? GOAL_Y_END - (8 + Math.random() * 14)
+                                                : GOAL_Y_START + (8 + Math.random() * 14);
+                                        } else {
+                                            targetY = oppGK.y < FIELD_HEIGHT / 2
+                                                ? GOAL_Y_START + (8 + Math.random() * 14)
+                                                : GOAL_Y_END - (8 + Math.random() * 14);
+                                        }
+                                    } else {
+                                        targetY = Math.random() < 0.5
+                                            ? GOAL_Y_START + (10 + Math.random() * 15)
+                                            : GOAL_Y_END - (10 + Math.random() * 15);
+                                    }
+
+                                    let shotAngle = Math.atan2(targetY - this.y, oppGoalX - this.x);
+
+                                    let curveForce = 0;
+                                    let isWideAngle = Math.abs(this.y - FIELD_HEIGHT / 2) > 55;
+                                    if ((isWideAngle || distToGoal > 185) && this.stamina > 20 && Math.random() < 0.55) {
+                                        this.stamina = Math.max(0, this.stamina - 8);
+                                        if (this.team === 'blue') {
+                                            curveForce = this.y < FIELD_HEIGHT / 2 ? 1 : -1;
+                                        } else {
+                                            curveForce = this.y < FIELD_HEIGHT / 2 ? -1 : 1;
+                                        }
+                                        shotAngle -= curveForce * 0.14;
+                                    }
+
+                                    let powerRating = (this.stats.pot + this.stats.dis) / 2;
+                                    ball.kick(
+                                        Math.cos(shotAngle) * this.shootForce,
+                                        Math.sin(shotAngle) * this.shootForce,
+                                        true,
+                                        false,
+                                        curveForce,
+                                        powerRating
+                                    );
+                                    this.kickAngle = shotAngle;
+                                    this.facingAngle = shotAngle;
+                                    this.visualState = 'kick';
+                                    this.actionTimer = 16;
+                                }
+                            }
+                        } else if (this.team === 'red') {
+                            // =========================================================
+                            // IA MODO AMISTOSO (con mayor asociación de pases rasos y aéreos)
+                            // =========================================================
+                            let goalX = 0; let goalY = FIELD_HEIGHT / 2;
+                            this.moveTo(goalX, goalY, aiSpeedBase);
+
+                            let distToGoal = Math.hypot(goalX - this.x, goalY - this.y);
+                            let passed = false;
+
+                            // El rival también busca asociarse con compañeros desmarcados (raso o aéreo)
+                            let friendlyPassChance = distToClosestOpp < 68 ? 0.085 : (distToGoal > 220 ? 0.052 : 0.03);
+                            if (bestMate && bestPassScore > 36 && Math.random() < friendlyPassChance) {
+                                let pAngle = Math.atan2(bestMate.y - this.y, bestMate.x - this.x);
+                                let dMate = distance(this.x, this.y, bestMate.x, bestMate.y);
+                                let useLob = (bestPassNeedsLob || (dMate > 220 && Math.random() < 0.4)) && this.stamina > 15;
+                                if (useLob) this.stamina = Math.max(0, this.stamina - 8);
+
+                                ball.kick(
+                                    Math.cos(pAngle) * this.passForce * (useLob ? 0.78 : 1.0),
+                                    Math.sin(pAngle) * this.passForce * (useLob ? 0.78 : 1.0),
+                                    false,
+                                    useLob,
+                                    0
+                                );
+                                this.kickAngle = pAngle;
+                                this.facingAngle = pAngle;
+                                this.visualState = 'kick';
+                                this.actionTimer = 14;
+                                passed = true;
+                            }
+
+                            if (!passed && distToGoal < 250 && Math.random() < 0.035) {
+                                let angle = Math.atan2(goalY - this.y, goalX - this.x);
+                                let powerRating = (this.stats.pot + this.stats.dis) / 2;
+                                ball.kick(Math.cos(angle) * this.shootForce, Math.sin(angle) * this.shootForce, true, false, 0, powerRating);
+                                this.kickAngle = angle;
+                                this.facingAngle = angle;
+                                this.visualState = 'kick';
+                                this.actionTimer = 16;
+                            }
                         }
                     } else {
                         let targetX = this.startX;
                         let targetY = this.startY;
+                        let dir = this.team === 'blue' ? 1 : -1;
 
                         let numST = outfieldTeammates.filter(p => p.role === 'ST').length + (this.role === 'ST' ? 1 : 0);
                         let numCB = outfieldTeammates.filter(p => p.role === 'CB').length + (this.role === 'CB' ? 1 : 0);
@@ -2202,17 +2419,36 @@
                         const mirrorMap = { 'CB': 'ST', 'ST': 'CB', 'LW': 'RW', 'RW': 'LW', 'CM': 'CM', 'CDM': 'CAM', 'CAM': 'CDM', 'GK': 'ST' };
                         let mirrorOpp = opponents.find(o => o.role === mirrorMap[this.role]) || opponents[0];
 
+                        // Calcular dónde está el atacante rival más adelantado hacia nuestra portería para fijar la línea defensiva
+                        let furthestOppX = this.team === 'blue'
+                            ? (opponents.length > 0 ? Math.min(...opponents.map(o => o.x)) : FIELD_WIDTH / 2)
+                            : (opponents.length > 0 ? Math.max(...opponents.map(o => o.x)) : FIELD_WIDTH / 2);
+
+                        // Posición ideal del último hombre: un poco más atrás (45 px) del rival más adelantado, sin quedarse hundido en el área
+                        let lastManLineX = this.team === 'blue'
+                            ? Math.max(75, Math.min(FIELD_WIDTH - 190, furthestOppX - 45))
+                            : Math.min(FIELD_WIDTH - 75, Math.max(190, furthestOppX + 45));
+
                         if (opposingGKHasBall && this.team !== ball.possessor.team) {
                             let retreatX = this.team === 'blue' ? FIELD_WIDTH * 0.35 : FIELD_WIDTH * 0.65;
                             targetX = retreatX;
                             targetY = this.startY;
                         } else if (!ball.possessor && this === closestTeammate) {
-                            targetX = ball.x;
-                            targetY = ball.y;
+                            // Si el balón viene por el aire, anticipar su punto de caída
+                            targetX = ball.z > 8 ? ball.x + ball.vx * 6 : ball.x;
+                            targetY = ball.z > 8 ? ball.y + ball.vy * 6 : ball.y;
                         } else if (oppHasInitiative) {
+                            // =========================================================
+                            // BAJAR COMO BLOQUE COMPACTO EN DEFENSA
+                            // =========================================================
                             let focusTarget = ball.possessor || ball;
                             let ownGoalX = this.team === 'blue' ? 0 : FIELD_WIDTH;
                             let ownGoalY = FIELD_HEIGHT / 2;
+
+                            // Cuánto ha retrocedido el balón respecto al centro del campo (0 = mediocampo, 1 = área propia)
+                            let defensiveDepth = this.team === 'blue'
+                                ? Math.max(0, Math.min(1, (FIELD_WIDTH * 0.55 - focusTarget.x) / (FIELD_WIDTH * 0.55)))
+                                : Math.max(0, Math.min(1, (focusTarget.x - FIELD_WIDTH * 0.45) / (FIELD_WIDTH * 0.55)));
 
                             if (this === closestTeammate) {
                                 // Presionar directamente al portador o interceptar su carrera
@@ -2243,97 +2479,128 @@
                                         }
                                     }
                                 }
-                            } else if (Math.abs(focusTarget.x - ownGoalX) < 300 && (this.role === 'CB' || this.role === 'CDM' || distance(this.x, this.y, focusTarget.x, focusTarget.y) < 170)) {
-                                // Cobertura defensiva: interponerse en la línea de tiro entre el balón y la portería propia
+                            } else if (this.role === 'CB') {
+                                // El último defensa mantiene la línea justo detrás del rival más adelantado, basculando hacia el balón
+                                targetX = lastManLineX;
+                                targetY = FIELD_HEIGHT / 2 + (focusTarget.y - FIELD_HEIGHT / 2) * 0.45 + (this.startY - FIELD_HEIGHT / 2) * 0.35;
+                            } else if (Math.abs(focusTarget.x - ownGoalX) < 300 && (this.role === 'CDM' || distance(this.x, this.y, focusTarget.x, focusTarget.y) < 170)) {
+                                // Cobertura defensiva en la línea de tiro
                                 targetX = focusTarget.x * 0.65 + ownGoalX * 0.35;
                                 targetY = focusTarget.y * 0.65 + ownGoalY * 0.35;
                             } else {
-                                let defDir = this.team === 'blue' ? -30 : 30;
-                                targetX = mirrorOpp.x + defDir;
-                                targetY = mirrorOpp.y;
+                                // Todo el bloque (medios, extremos y delanteros) repliega unido manteniendo distancias cortas
+                                let blockAnchorX = focusTarget.x - (55 * dir);
+                                let roleOffset = 0;
+                                if (this.role === 'CDM') roleOffset = -95 * dir;
+                                else if (this.role === 'CM') roleOffset = -45 * dir;
+                                else if (this.role === 'CAM') roleOffset = 15 * dir;
+                                else if (this.role === 'LW' || this.role === 'RW') roleOffset = 25 * dir;
+                                else if (this.role === 'ST') roleOffset = (85 - defensiveDepth * 45) * dir;
 
-                                let ownHalfX = this.team === 'blue' ? FIELD_WIDTH * 0.4 : FIELD_WIDTH * 0.6;
+                                targetX = blockAnchorX + roleOffset;
+                                // Asegurar que nadie quede más atrás que el último hombre sin necesidad
+                                if (this.team === 'blue' && targetX < lastManLineX + 25) targetX = lastManLineX + 25;
+                                if (this.team === 'red' && targetX > lastManLineX - 25) targetX = lastManLineX - 25;
 
-                                if (this.role === 'LW' || this.role === 'RW') {
-                                    let dropTargetX = ownHalfX;
-                                    if (numCB <= 2) dropTargetX = this.team === 'blue' ? ownHalfX - 60 : ownHalfX + 60;
-                                    else if (numST >= 2 && numCB >= 2) dropTargetX = ownHalfX;
-                                    else dropTargetX = this.team === 'blue' ? ownHalfX + 40 : ownHalfX - 40;
+                                // Basculación vertical del bloque hacia el lado donde está el balón
+                                let laneY = mirrorOpp ? (mirrorOpp.y * 0.55 + this.startY * 0.45) : this.startY;
+                                targetY = laneY * 0.65 + focusTarget.y * 0.35;
 
-                                    if (this.team === 'blue' && targetX > dropTargetX) targetX = dropTargetX;
-                                    if (this.team === 'red' && targetX < dropTargetX) targetX = dropTargetX;
-                                } else if (this.role === 'CM') {
-                                    if (this.team === 'blue' && targetX > ownHalfX) targetX = ownHalfX;
-                                    if (this.team === 'red' && targetX < ownHalfX) targetX = ownHalfX;
-                                } else if (this.role === 'CDM') {
-                                    let cdmDrop = this.team === 'blue' ? ownHalfX - 80 : ownHalfX + 80;
-                                    if (this.team === 'blue' && targetX > cdmDrop) targetX = cdmDrop;
-                                    if (this.team === 'red' && targetX < cdmDrop) targetX = cdmDrop;
-                                }
-
-                                if (distance(this.x, this.y, focusTarget.x, focusTarget.y) < 100) {
-                                    targetX = focusTarget.x + defDir;
+                                if (distance(this.x, this.y, focusTarget.x, focusTarget.y) < 105) {
+                                    targetX = focusTarget.x - (30 * dir);
                                     targetY = focusTarget.y;
                                 }
                             }
                         } else if (teamHasInitiative) {
-                            let dir = this.team === 'blue' ? 1 : -1;
+                            // =========================================================
+                            // SUBIR COMO BLOQUE COMPACTO EN ATAQUE (LÍNEA ADELANTADA)
+                            // =========================================================
+                            let carrierX = ball.possessor ? ball.possessor.x : ball.x;
 
                             if (this.role === 'CB') {
-                                targetX = this.startX + (ball.x - this.startX) * 0.3;
-                                targetY = FIELD_HEIGHT / 2;
-                            } else if (this.role === 'CDM') {
-                                targetX = ball.x - (120 * dir);
-                                targetY = FIELD_HEIGHT / 2;
-                            } else if (this.role === 'CM') {
-                                targetX = ball.x - (80 * dir);
-                                targetY = FIELD_HEIGHT / 2 + (this.startY - FIELD_HEIGHT / 2) * 0.4;
-                            } else if (this.role === 'CAM') {
-                                targetX = numST === 1 ? ball.x + (50 * dir) : ball.x;
-                                targetY = FIELD_HEIGHT / 2;
-                            } else if (this.role === 'LW' || this.role === 'RW') {
-                                let wingPush = numST === 1 ? 80 : (numCB <= 2 ? 10 : 40);
-                                let otherWingRole = this.role === 'LW' ? 'RW' : 'LW';
-                                let otherWing = outfieldTeammates.find(p => p.role === otherWingRole);
-                                let otherWingAttacking = otherWing && ((this.team === 'blue' && otherWing.x > FIELD_WIDTH / 2 + 50) || (this.team === 'red' && otherWing.x < FIELD_WIDTH / 2 - 50));
-
-                                if (otherWingAttacking && ball.possessor !== this) {
-                                    targetX = this.startX + (30 * dir);
-                                    targetY = this.role === 'LW' ? 120 : FIELD_HEIGHT - 120;
+                                // El último hombre sube con el equipo y se sitúa justo detrás del delantero rival más adelantado
+                                let supportMidX = carrierX - (180 * dir);
+                                if (this.team === 'blue') {
+                                    targetX = Math.max(lastManLineX, Math.min(FIELD_WIDTH * 0.62, supportMidX));
                                 } else {
-                                    targetX = ball.x + (wingPush * dir);
-                                    targetY = this.role === 'LW' ? 60 : FIELD_HEIGHT - 60;
+                                    targetX = Math.min(lastManLineX, Math.max(FIELD_WIDTH * 0.38, supportMidX));
                                 }
+                                targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.35 + (this.startY - FIELD_HEIGHT / 2) * 0.3;
+                            } else if (this.role === 'CDM') {
+                                // Pivote ofreciendo apoyo corto detrás del balón
+                                targetX = carrierX - (95 * dir);
+                                targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.45;
+                            } else if (this.role === 'CM') {
+                                // Interior acompañando la jugada en línea de pase diagonal
+                                targetX = carrierX - (45 * dir);
+                                targetY = FIELD_HEIGHT / 2 + (this.startY - FIELD_HEIGHT / 2) * 0.55 + (ball.y - FIELD_HEIGHT / 2) * 0.25;
+                            } else if (this.role === 'CAM') {
+                                // Mediapunta atacando intervalos entre líneas
+                                targetX = carrierX + (65 * dir);
+                                targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.3;
+                            } else if (this.role === 'LW' || this.role === 'RW') {
+                                // Extremos abriendo el campo y proyectándose al ataque en bloque
+                                let wingPush = numST === 1 ? 95 : (numCB <= 2 ? 40 : 65);
+                                targetX = carrierX + (wingPush * dir);
+                                targetY = this.role === 'LW' ? 68 : FIELD_HEIGHT - 68;
                             } else if (this.role === 'ST') {
-                                let edgeOfBox = this.team === 'blue' ? FIELD_WIDTH - 150 : 150;
-                                targetX = ball.x + (100 * dir);
-                                if (this.team === 'blue' && targetX > edgeOfBox && ball.x < edgeOfBox) targetX = edgeOfBox;
-                                if (this.team === 'red' && targetX < edgeOfBox && ball.x > edgeOfBox) targetX = edgeOfBox;
-                                targetY = FIELD_HEIGHT / 2;
+                                // Delantero centro fijando a los centrales y buscando desmarque al área
+                                let edgeOfBox = this.team === 'blue' ? FIELD_WIDTH - 125 : 125;
+                                targetX = carrierX + (115 * dir);
+                                if (this.team === 'blue' && targetX > edgeOfBox && carrierX < edgeOfBox) targetX = edgeOfBox;
+                                if (this.team === 'red' && targetX < edgeOfBox && carrierX > edgeOfBox) targetX = edgeOfBox;
+                                targetY = FIELD_HEIGHT / 2 + (ball.y - FIELD_HEIGHT / 2) * 0.25;
                             }
 
-                            if (ball.possessor !== this) {
-                                let closestOpp = opponents.reduce((prev, curr) =>
+                            if (ball.possessor !== this && opponents.length > 0) {
+                                let nearestMark = opponents.reduce((prev, curr) =>
                                     distance(this.x, this.y, curr.x, curr.y) < distance(this.x, this.y, prev.x, prev.y) ? curr : prev
                                 );
-                                if (closestOpp && distance(this.x, this.y, closestOpp.x, closestOpp.y) < 70) {
-                                    let escapeAngle = Math.atan2(this.y - closestOpp.y, this.x - closestOpp.x);
-                                    targetX += Math.cos(escapeAngle) * 60;
-                                    targetY += Math.sin(escapeAngle) * 60;
+                                if (nearestMark && distance(this.x, this.y, nearestMark.x, nearestMark.y) < 68) {
+                                    let escapeAngle = Math.atan2(this.y - nearestMark.y, this.x - nearestMark.x);
+                                    targetX += Math.cos(escapeAngle) * 58;
+                                    targetY += Math.sin(escapeAngle) * 58;
                                 }
                             }
                         }
 
-                        if (oppHasInitiative && ball.z > 25 && this.z === 0 && distance(this.x, this.y, ball.x, ball.y) < 70) {
-                            if (this.stamina > 15 && this.stats.ent + this.stats.pot > 140) {
-                                if (Math.random() < 0.1) {
+                        // =========================================================
+                        // INTERCEPCIÓN Y CONTROL DE BALONES AÉREOS (PARA AMBOS EQUIPOS)
+                        // =========================================================
+                        let predBallX = ball.x + ball.vx * 5;
+                        let predBallY = ball.y + ball.vy * 5;
+                        let distToPredBall = distance(this.x, this.y, predBallX, predBallY);
+
+                        if (!ball.possessor && ball.z > 12 && this.z === 0 && distToPredBall < 82) {
+                            let isAerialPassForMe = (ball.lastTeam === this.team && this === closestTeammate);
+                            let isAerialInterception = (ball.lastTeam !== this.team);
+
+                            if ((isAerialPassForMe || isAerialInterception) && this.stamina > 12) {
+                                let jumpChance = isAerialPassForMe ? 0.22 : (0.08 + (this.stats.ent / 99) * 0.14);
+                                if (Math.random() < jumpChance) {
                                     this.stamina -= 5;
-                                    this.jump(true);
-                                    let jAngle = Math.atan2(ball.y - this.y, ball.x - this.x);
-                                    let jumpSpeedH = this.sprintSpeed * 0.8;
+                                    this.jump(isAerialInterception);
+                                    let jAngle = Math.atan2(predBallY - this.y, predBallX - this.x);
+                                    let jumpSpeedH = this.sprintSpeed * 0.85;
                                     this.vx = Math.cos(jAngle) * jumpSpeedH;
                                     this.vy = Math.sin(jAngle) * jumpSpeedH;
-                                    this.airAction = 'clear';
+
+                                    if (isAerialPassForMe) {
+                                        // Bajar y controlar el pase aéreo para continuar la jugada
+                                        this.airAction = 'control';
+                                        this.headerTargetAngle = null;
+                                    } else {
+                                        // Interceptar balón aéreo rival: despejar hacia adelante o controlar si tiene buena técnica
+                                        let clearGoalX = this.team === 'blue' ? FIELD_WIDTH : 0;
+                                        let clearAngle = Math.atan2((FIELD_HEIGHT / 2 + (Math.random() - 0.5) * 140) - this.y, clearGoalX - this.x);
+                                        if (this.stats.con > 82 && Math.random() < 0.45) {
+                                            this.airAction = 'control';
+                                            this.headerTargetAngle = null;
+                                        } else {
+                                            this.airAction = 'deflect';
+                                            this.headerTargetAngle = clearAngle;
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2395,7 +2662,7 @@
                                     ball.vy = Math.sin(this.headerTargetAngle) * 12;
                                     ball.vz = 3;
                                     this.headerTargetAngle = null;
-                                } else if (this.airAction === 'control' || keys.k || (this.team === 'red' && Math.random() < 0.5)) {
+                                } else if (this.airAction === 'control' || keys.k || (!this.isActive && Math.random() < 0.6)) {
                                     ball.possessor = this;
                                     ball.lastTeam = this.team;
                                     ball.registerTouch(this);
@@ -2623,6 +2890,7 @@
         let staminaPickups = [];
         let pickupTimer = 0;
         let currentMode = '3';
+        let currentDifficulty = 'amistoso';
 
         let gameSpeed = 0.35;
         let frameRemainder = 0;
@@ -2643,6 +2911,7 @@
         scene.add(passRing3D);
 
         const modeSelect = document.getElementById('modeSelect');
+        const difficultySelect = document.getElementById('difficultySelect');
         const myTeamSelect = document.getElementById('myTeamSelect');
         const rivalTeamSelect = document.getElementById('rivalTeamSelect');
         const slotsContainer = document.getElementById('slotsContainer');
@@ -2651,6 +2920,10 @@
         modeSelect.addEventListener('change', (e) => {
             currentMode = e.target.value;
             generateSlots();
+        });
+
+        difficultySelect.addEventListener('change', (e) => {
+            currentDifficulty = e.target.value;
         });
 
         myTeamSelect.addEventListener('change', generateSlots);
